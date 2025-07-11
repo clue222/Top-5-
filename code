@@ -1,0 +1,92 @@
+#@ Double	fraction			(label = "High and low fraction to measure", value = 0.05, min=0, max=1)
+#@ Double	percentileCutOff	(label = "Lowest cutoff fraction to exclude", value = 0.01, min=0)
+#@ Boolean	ignoreZeros			(label = "Ignore pixels with zero gray value", value = true)
+
+orig = getTitle();
+count = roiManager("count");
+if (count == 0) {
+	exit("ROI manager cannot be empty");
+}
+run("Clear Results");
+Overlay.clear;
+setBatchMode(true);
+
+for (j = 0; j < count; j++) {
+	roiManager("select", j);
+	getRawStatistics(area, mean, min, max, std, histogram);
+	nBins = histogram.length;
+
+	filteredMin = 0;
+	filteredMax = histogram.length - 1;
+
+	if (ignoreZeros == true) {
+		area = area - histogram[0];
+		filteredMin = 1;
+	}
+
+	// Remove only the lowest percentileCutOff
+	acc = 0;
+	while (acc < area * percentileCutOff) {
+		acc += histogram[filteredMin];
+		filteredMin++;
+	}
+	// Do NOT filter the high end
+	// filteredMax remains at highest bin
+
+	range = (filteredMax - filteredMin);
+
+	lowEnd = 0;
+	highEnd = 0;
+
+	for (i = 0; i < nBins; i++) {
+		if (i <= (filteredMin + (fraction * range))) {
+			lowEnd += histogram[i];
+		} else {
+			break;
+		}
+	}
+
+	for (i = (nBins - 1); i >= 0; i--) {
+		if (i >= (filteredMax - (fraction * range))) {
+			highEnd += histogram[i];
+		} else {
+			break;
+		}
+	}
+
+	setResult("Filtered Min", j, filteredMin);
+	setResult("Filtered Max", j, filteredMax);
+	setResult("Low Pixel Count", j, lowEnd);
+	setResult("Low Pixel %Area", j, d2s(100 * (lowEnd / area), 2));
+	setResult("High Pixel Count", j, highEnd);
+	setResult("High Pixel %Area", j, d2s(100 * (highEnd / area), 2));
+
+	highThreshold = (filteredMax - (fraction * range));
+	lowThreshold = (filteredMin + (fraction * range));
+
+	getSelectionBounds(x, y, width, height);
+	addOverlay(orig, false, lowThreshold, "Green", j, x, y);
+	Overlay.show();
+	addOverlay(orig, true, highThreshold, "Red", j, x, y);
+	Overlay.show();
+}
+
+run("Select None");
+roiManager("Show All");
+
+function addOverlay(orig, high, threshold, colour, j, x, y) {
+	run("Duplicate...", "title=" + j); // duplicate only the ROI for speed
+	if (high) {
+		setThreshold(threshold, pow(2, bitDepth()));
+	} else {
+		setThreshold(0, threshold);
+	}
+	run("Convert to Mask");
+	run(colour);
+	run("Restore Selection");
+	run("Clear Outside");
+	selectImage(orig);
+	run("Add Image...", "image=[" + j + "] x=" + x + " y=" + y + " opacity=50 zero");
+	close(j);
+}
+
